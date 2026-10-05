@@ -11,16 +11,20 @@ composer require marko/authorization
 ## Quick Example
 
 ```php
-use Marko\Authorization\Contracts\GateInterface;
+use Marko\Authorization\Attributes\Can;
+use Marko\Routing\Attributes\Get;
+use Marko\Routing\Http\Response;
 
-// Define an ability
-$gate->define(
-    'edit-settings',
-    fn (?AuthorizableInterface $user) => $user?->can('admin', true) ?? false,
-);
-
-// Check it
-$gate->authorize('edit-settings');
+class AdminController
+{
+    // Enforced on every request once the package is installed: 401 if logged out, 403 if denied
+    #[Get('/admin')]
+    #[Can('admin.access')]
+    public function dashboard(): Response
+    {
+        return new Response('Welcome');
+    }
+}
 ```
 
 ## Documentation

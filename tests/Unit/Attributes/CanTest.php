@@ -22,12 +22,12 @@ it('creates Can attribute with ability and entity class', function (): void {
         ->and($can->entityClass)->toBe('App\\Entity\\Post');
 });
 
-it('targets methods only', function (): void {
+it('targets classes and methods', function (): void {
     $reflection = new ReflectionClass(Can::class);
     $attributes = $reflection->getAttributes(Attribute::class);
 
     expect($attributes)->toHaveCount(1);
 
     $attributeInstance = $attributes[0]->newInstance();
-    expect($attributeInstance->flags)->toBe(Attribute::TARGET_METHOD);
+    expect($attributeInstance->flags)->toBe(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD);
 });

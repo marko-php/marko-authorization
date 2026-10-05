@@ -11,16 +11,30 @@ use Marko\Authorization\Contracts\GateInterface;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\Middleware\MiddlewareInterface;
+use ReflectionClass;
 use ReflectionException;
 use ReflectionMethod;
 
-readonly class AuthorizationMiddleware implements MiddlewareInterface
+/**
+ * Enforces #[Can] on the matched controller action.
+ *
+ * Reads the matched route from the request (set by the Router before the
+ * pipeline runs). A method-level #[Can] overrides a class-level one. Routes
+ * without #[Can] pass straight through.
+ */
+class AuthorizationMiddleware implements MiddlewareInterface
 {
+    /**
+     * Resolved #[Can] per "controller::action". Holds only immutable attribute
+     * data, so it is safe to keep across requests in long-running workers.
+     *
+     * @var array<string, ?Can>
+     */
+    private array $resolved = [];
+
     public function __construct(
-        private GateInterface $gate,
-        private GuardInterface $guard,
-        private ?string $controller = null,
-        private ?string $action = null,
+        private readonly GateInterface $gate,
+        private readonly GuardInterface $guard,
     ) {}
 
     /**
@@ -30,7 +44,7 @@ readonly class AuthorizationMiddleware implements MiddlewareInterface
         Request $request,
         callable $next,
     ): Response {
-        $canAttribute = $this->getCanAttribute();
+        $canAttribute = $this->resolveCanAttribute($request);
 
         if ($canAttribute === null) {
             return $next($request);
@@ -56,20 +70,40 @@ readonly class AuthorizationMiddleware implements MiddlewareInterface
     /**
      * @throws ReflectionException
      */
-    private function getCanAttribute(): ?Can
-    {
-        if ($this->controller === null || $this->action === null) {
+    private function resolveCanAttribute(
+        Request $request,
+    ): ?Can {
+        $controller = $request->controller();
+        $action = $request->action();
+
+        if ($controller === null || $action === null) {
             return null;
         }
 
-        $reflection = new ReflectionMethod($this->controller, $this->action);
-        $attributes = $reflection->getAttributes(Can::class);
+        $key = $controller . '::' . $action;
 
-        if (empty($attributes)) {
-            return null;
+        if (!array_key_exists($key, $this->resolved)) {
+            $this->resolved[$key] = $this->readCanAttribute($controller, $action);
         }
 
-        return $attributes[0]->newInstance();
+        return $this->resolved[$key];
+    }
+
+    /**
+     * @throws ReflectionException
+     */
+    private function readCanAttribute(
+        string $controller,
+        string $action,
+    ): ?Can {
+        $method = new ReflectionMethod($controller, $action);
+        $attributes = $method->getAttributes(Can::class);
+
+        if ($attributes === []) {
+            $attributes = new ReflectionClass($controller)->getAttributes(Can::class);
+        }
+
+        return $attributes === [] ? null : $attributes[0]->newInstance();
     }
 
     /**

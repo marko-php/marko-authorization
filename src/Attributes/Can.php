@@ -6,7 +6,7 @@ namespace Marko\Authorization\Attributes;
 
 use Attribute;
 
-#[Attribute(Attribute::TARGET_METHOD)]
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
 readonly class Can
 {
     public function __construct(
