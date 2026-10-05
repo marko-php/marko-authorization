@@ -12,6 +12,8 @@ use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Gate;
 use Marko\Authorization\Middleware\AuthorizationMiddleware;
 use Marko\Authorization\PolicyRegistry;
+use Marko\Config\ConfigRepository;
+use Marko\Config\ConfigRepositoryInterface;
 use Marko\Core\Container\Container;
 use Marko\Core\Module\DependencyResolver;
 use Marko\Core\Module\GlobalMiddlewareResolver;
@@ -21,6 +23,7 @@ use Marko\Routing\Http\Response;
 use Marko\Testing\Fake\FakeAuthenticatable;
 use Marko\Testing\Fake\FakeConfigRepository;
 use Marko\Testing\Fake\FakeGuard;
+use RuntimeException;
 
 class WiringController
 {
@@ -81,6 +84,58 @@ it('orders the session middleware before the authorization middleware', function
 
 it('registers AuthorizationMiddleware as a singleton', function (): void {
     expect(authorizationModule()['singletons'])->toContain(AuthorizationMiddleware::class);
+});
+
+it('resolves the gate and runs the middleware with the shipped config', function (): void {
+    $defaultGuard = new FakeGuard(name: 'web');
+    $defaultGuard->setUser(new FakeAuthenticatable());
+
+    /** @noinspection PhpMissingParentConstructorInspection - Test stub intentionally skips parent */
+    $authManager = new class ($defaultGuard) extends AuthManager
+    {
+        /** @noinspection PhpMissingParentConstructorInspection */
+        public function __construct(
+            private readonly GuardInterface $defaultGuard,
+        ) {}
+
+        public function guard(
+            ?string $name = null,
+        ): GuardInterface {
+            if ($name !== null) {
+                throw new RuntimeException("Expected the authentication default guard, got '$name'");
+            }
+
+            return $this->defaultGuard;
+        }
+    };
+
+    $module = authorizationModule();
+    $container = new Container();
+    $container->instance(AuthManager::class, $authManager);
+    $container->instance(ConfigRepositoryInterface::class, new ConfigRepository([
+        'authorization' => require dirname(__DIR__, 2) . '/config/authorization.php',
+    ]));
+
+    foreach ($module['bindings'] as $id => $factory) {
+        $container->bind($id, $factory);
+    }
+
+    foreach ($module['singletons'] as $id) {
+        $container->singleton($id);
+    }
+
+    /** @var GateInterface $gate */
+    $gate = $container->get(GateInterface::class);
+    $gate->define('edit', fn (): bool => true);
+
+    /** @var AuthorizationMiddleware $middleware */
+    $middleware = $container->get(AuthorizationMiddleware::class);
+    $request = new Request()->withRoute(WiringController::class, 'edit');
+
+    $response = $middleware->handle($request, fn (Request $r): Response => new Response(body: 'edited'));
+
+    expect($response->statusCode())->toBe(200)
+        ->and($response->body())->toBe('edited');
 });
 
 it('builds the middleware with the guard configured for authorization', function (): void {
