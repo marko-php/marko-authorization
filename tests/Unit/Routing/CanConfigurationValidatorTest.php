@@ -213,7 +213,7 @@ function validatorContainerWithRealAuthManager(
     return $container;
 }
 
-it('throws AuthorizationConfigurationException wrapping AuthException when the default guard is not configured', function (): void {
+it('wraps the AuthException when the default guard is not configured', function (): void {
     $container = validatorContainerWithRealAuthManager([
         'authorization.default_guard' => null,
         'authentication.default.guard' => 'wbe',
@@ -224,11 +224,12 @@ it('throws AuthorizationConfigurationException wrapping AuthException when the d
         $this->fail('Expected AuthorizationConfigurationException');
     } catch (AuthorizationConfigurationException $e) {
         $previous = $e->getPrevious();
+        $context = $previous instanceof AuthException ? $previous->getContext() : '';
 
         expect($e->getMessage())->toContain("guard 'wbe'")
             ->toContain('is not defined in authentication.guards')
             ->and($previous)->toBeInstanceOf(AuthException::class)
-            ->and($previous instanceof AuthException ? $previous->getContext() : '')->toContain('Configured guards: web');
+            ->and($context)->toContain('Configured guards: web');
     }
 });
 
@@ -239,5 +240,8 @@ it('throws when authorization.default_guard names a guard missing from authentic
     ]);
 
     expect(fn () => canValidator($container)->validate(validatorRoutes('edit')))
-        ->toThrow(AuthorizationConfigurationException::class, "guard 'apii' cannot be built: Guard 'apii' is not defined");
+        ->toThrow(
+            AuthorizationConfigurationException::class,
+            "guard 'apii' cannot be built: Guard 'apii' is not defined",
+        );
 });
