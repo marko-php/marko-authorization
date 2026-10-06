@@ -7,9 +7,11 @@ namespace Marko\Authorization\Tests\Unit\Middleware;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
+use Marko\Authorization\Exceptions\AuthorizationException;
 use Marko\Authorization\Gate;
 use Marko\Authorization\Middleware\AuthorizationMiddleware;
 use Marko\Authorization\PolicyRegistry;
+use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Testing\Fake\FakeGuard;
@@ -17,17 +19,20 @@ use Marko\Testing\Fake\FakeGuard;
 // Test controllers
 class PostController
 {
+    /** @noinspection PhpUnused - Read via reflection by the middleware */
     #[Can('create-post')]
     public function create(): Response
     {
         return new Response(body: 'created', statusCode: 200);
     }
 
+    /** @noinspection PhpUnused - Read via reflection by the middleware */
     public function index(): Response
     {
         return new Response(body: 'index', statusCode: 200);
     }
 
+    /** @noinspection PhpUnused - Read via reflection by the middleware */
     #[Can('update', 'App\\Entity\\Post')]
     public function update(): Response
     {
@@ -129,7 +134,7 @@ it('allows request when gate allows the ability', function (): void {
         ->and($response->body())->toBe('success');
 });
 
-it('returns 403 when gate denies the ability', function (): void {
+it('throws a 403 AuthorizationException when gate denies the ability', function (): void {
     $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
     $guard->setUser(new MiddlewareStubUser());
 
@@ -138,31 +143,27 @@ it('returns 403 when gate denies the ability', function (): void {
 
     $middleware = createAuthMiddleware(gate: $gate, guard: $guard);
 
-    $request = createRoutedRequest('create');
-    $response = $middleware->handle($request, createSuccessfulNext());
-
-    expect($response->statusCode())->toBe(403)
-        ->and($response->body())->toBe('Forbidden');
+    expect(fn () => $middleware->handle(createRoutedRequest('create'), createSuccessfulNext()))
+        ->toThrow(AuthorizationException::class);
 });
 
-it('returns JSON 403 for API requests when denied', function (): void {
+it('carries the ability and entity class on the thrown AuthorizationException', function (): void {
     $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
     $guard->setUser(new MiddlewareStubUser());
 
     $gate = createMiddlewareGate(guard: $guard);
-    $gate->define('create-post', fn (?AuthorizableInterface $user): bool => false);
+    $gate->define('update', fn (?AuthorizableInterface $user, mixed ...$args): bool => false);
 
     $middleware = createAuthMiddleware(gate: $gate, guard: $guard);
 
-    $request = createRoutedRequest('create', [
-        'HTTP_ACCEPT' => 'application/json',
-    ]);
-    $response = $middleware->handle($request, createSuccessfulNext());
-
-    expect($response->statusCode())->toBe(403)
-        ->and($response->headers())->toHaveKey('Content-Type')
-        ->and($response->headers()['Content-Type'])->toBe('application/json')
-        ->and(json_decode($response->body(), true))->toBe(['error' => 'Forbidden']);
+    try {
+        $middleware->handle(createRoutedRequest('update'), createSuccessfulNext());
+        $this->fail('Expected AuthorizationException');
+    } catch (AuthorizationException $exception) {
+        expect($exception->getStatusCode())->toBe(403)
+            ->and($exception->getAbility())->toBe('update')
+            ->and($exception->getResource())->toBe('App\\Entity\\Post');
+    }
 });
 
 it('skips authorization when no Can attribute is present', function (): void {
@@ -197,7 +198,7 @@ it('reads Can attribute from controller method via reflection', function (): voi
     expect($response->statusCode())->toBe(200);
 });
 
-it('returns 401 when user is not authenticated', function (): void {
+it('throws a 401 HttpException when user is not authenticated', function (): void {
     $guard = new FakeGuard(name: 'middleware-test', attemptResult: false); // No user set
 
     $gate = createMiddlewareGate(guard: $guard);
@@ -205,26 +206,12 @@ it('returns 401 when user is not authenticated', function (): void {
 
     $middleware = createAuthMiddleware(gate: $gate, guard: $guard);
 
-    $request = createRoutedRequest('create', [
-        'HTTP_ACCEPT' => 'application/json',
-    ]);
-    $response = $middleware->handle($request, createSuccessfulNext());
-
-    expect($response->statusCode())->toBe(401);
-});
-
-it('returns plain 401 for web requests when not authenticated', function (): void {
-    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false); // No user set
-
-    $gate = createMiddlewareGate(guard: $guard);
-
-    $middleware = createAuthMiddleware(gate: $gate, guard: $guard);
-
-    $request = createRoutedRequest('create');
-    $response = $middleware->handle($request, createSuccessfulNext());
-
-    expect($response->statusCode())->toBe(401)
-        ->and($response->body())->toBe('Unauthorized');
+    try {
+        $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+        $this->fail('Expected HttpException');
+    } catch (HttpException $exception) {
+        expect($exception->getStatusCode())->toBe(401);
+    }
 });
 
 it('passes entity class from Can attribute to gate', function (): void {
@@ -270,11 +257,18 @@ it('reuses the resolved Can attribute for repeated requests to the same action',
 
     $middleware = createAuthMiddleware(gate: $gate, guard: $guard);
 
-    $first = $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
-    $second = $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+    $denied = 0;
+
+    foreach ([1, 2] as $ignored) {
+        try {
+            $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+        } catch (AuthorizationException) {
+            $denied++;
+        }
+    }
+
     $unprotected = $middleware->handle(createRoutedRequest('index'), createSuccessfulNext());
 
-    expect($first->statusCode())->toBe(403)
-        ->and($second->statusCode())->toBe(403)
+    expect($denied)->toBe(2)
         ->and($unprotected->statusCode())->toBe(200);
 });

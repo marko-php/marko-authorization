@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization;
 
-use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
 
 class PolicyRegistry
 {
@@ -16,21 +16,17 @@ class PolicyRegistry
      *
      * @param class-string $entityClass
      * @param class-string $policyClass
-     * @throws AuthorizationException
+     * @throws PolicyException
      */
     public function register(
         string $entityClass,
         string $policyClass,
     ): void {
         if (isset($this->policies[$entityClass])) {
-            $existing = $this->policies[$entityClass];
-
-            throw new AuthorizationException(
-                message: "A policy is already registered for '$entityClass'",
-                ability: '',
-                resource: $entityClass,
-                context: "Attempted to register '$policyClass' for '$entityClass', but '$existing' is already registered",
-                suggestion: 'Remove the duplicate policy registration or use a different entity class',
+            throw PolicyException::duplicatePolicy(
+                entityClass: $entityClass,
+                policyClass: $policyClass,
+                existing: $this->policies[$entityClass],
             );
         }
 

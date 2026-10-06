@@ -7,6 +7,7 @@ namespace Marko\Authorization;
 use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
 
 class Gate implements GateInterface
 {
@@ -25,6 +26,9 @@ class Gate implements GateInterface
         $this->abilities[$ability] = $callback;
     }
 
+    /**
+     * @throws PolicyException
+     */
     public function allows(
         string $ability,
         mixed ...$arguments,
@@ -59,6 +63,9 @@ class Gate implements GateInterface
         return false;
     }
 
+    /**
+     * @throws PolicyException
+     */
     public function denies(
         string $ability,
         mixed ...$arguments,
@@ -66,6 +73,9 @@ class Gate implements GateInterface
         return !$this->allows($ability, ...$arguments);
     }
 
+    /**
+     * @throws AuthorizationException|PolicyException
+     */
     public function authorize(
         string $ability,
         mixed ...$arguments,
@@ -80,6 +90,9 @@ class Gate implements GateInterface
         );
     }
 
+    /**
+     * @throws PolicyException
+     */
     public function policy(
         string $entityClass,
         string $policyClass,
@@ -100,6 +113,7 @@ class Gate implements GateInterface
 
     /**
      * @param array<int, mixed> $arguments
+     * @throws PolicyException
      */
     private function callPolicy(
         string $policyClass,
@@ -108,12 +122,9 @@ class Gate implements GateInterface
         array $arguments,
     ): bool {
         if (!$this->policyRegistry->hasAbility($policyClass, $ability)) {
-            throw new AuthorizationException(
-                message: "Policy '$policyClass' does not have a '$ability' method",
+            throw PolicyException::missingMethod(
+                policyClass: $policyClass,
                 ability: $ability,
-                resource: $policyClass,
-                context: "Attempted to check ability '$ability' on policy '$policyClass' but the method does not exist",
-                suggestion: "Add a '$ability' method to '$policyClass'",
             );
         }
 

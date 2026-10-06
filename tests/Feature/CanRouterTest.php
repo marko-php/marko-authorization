@@ -53,6 +53,27 @@ class RouterAdminController
     }
 }
 
+readonly class RouterGateController
+{
+    public function __construct(
+        private GateInterface $gate,
+    ) {}
+
+    /**
+     * Imperative check with no #[Can]: the denial comes from Gate::authorize().
+     *
+     * @noinspection PhpUnused - Invoked via the router
+     */
+    public function publish(): Response
+    {
+        $this->gate->authorize('publish-secret-report', RouterSecretReport::class);
+
+        return new Response(body: 'published');
+    }
+}
+
+class RouterSecretReport {}
+
 class RouterStubUser implements AuthorizableInterface
 {
     public function getAuthIdentifier(): int
@@ -136,6 +157,12 @@ function createAuthorizedRouter(
     ));
     $routes->add(new RouteDefinition(
         method: 'GET',
+        path: '/posts/publish',
+        controller: RouterGateController::class,
+        action: 'publish',
+    ));
+    $routes->add(new RouteDefinition(
+        method: 'GET',
         path: '/admin',
         controller: RouterAdminController::class,
         action: 'dashboard',
@@ -174,7 +201,9 @@ it('returns 403 through the router when the gate denies a Can ability', function
     $response = $router->handle(createRouterRequest('/posts/edit'));
 
     expect($response->statusCode())->toBe(403)
-        ->and($response->body())->toBe('Forbidden');
+        ->and($response->headers()['Content-Type'])->toContain('text/html')
+        ->and($response->body())->toContain('403 Forbidden')
+        ->toContain('Forbidden.');
 });
 
 it('returns 200 through the router when the gate allows a Can ability', function (): void {
@@ -186,22 +215,25 @@ it('returns 200 through the router when the gate allows a Can ability', function
         ->and($response->body())->toBe('edited');
 });
 
-it('returns plain 401 through the router for unauthenticated requests', function (): void {
+it('returns an HTML 401 through the renderer for a guest without a JSON Accept header', function (): void {
     $router = createAuthorizedRouter(abilities: ['edit' => true], authenticated: false);
 
-    $response = $router->handle(createRouterRequest('/posts/edit'));
+    $response = $router->handle(createRouterRequest('/posts/edit', ['HTTP_ACCEPT' => 'text/html']));
 
     expect($response->statusCode())->toBe(401)
-        ->and($response->body())->toBe('Unauthorized');
+        ->and($response->headers()['Content-Type'])->toContain('text/html')
+        ->and($response->body())->toContain('401 Unauthorized')
+        ->and($response->body())->not->toContain('edited');
 });
 
-it('returns JSON 401 through the router for unauthenticated JSON requests', function (): void {
+it('returns a JSON 401 through the renderer for a guest asking for application/vnd.api+json', function (): void {
     $router = createAuthorizedRouter(abilities: ['edit' => true], authenticated: false);
 
-    $response = $router->handle(createRouterRequest('/posts/edit', ['HTTP_ACCEPT' => 'application/json']));
+    $response = $router->handle(createRouterRequest('/posts/edit', ['HTTP_ACCEPT' => 'application/vnd.api+json']));
 
     expect($response->statusCode())->toBe(401)
-        ->and($response->body())->toBe('{"error":"Unauthorized"}');
+        ->and($response->headers()['Content-Type'])->toContain('application/json')
+        ->and(json_decode($response->body(), true))->toBe(['message' => 'Unauthorized.']);
 });
 
 it('passes routes without Can through the global middleware untouched', function (): void {
@@ -228,4 +260,36 @@ it('lets a method-level Can override the class-level Can', function (): void {
 
     expect($response->statusCode())->toBe(200)
         ->and($response->body())->toBe('reports');
+});
+
+it('returns 403, not 500, when a controller calls Gate::authorize() for a denied ability', function (): void {
+    $router = createAuthorizedRouter(abilities: ['publish-secret-report' => false]);
+
+    $response = $router->handle(createRouterRequest('/posts/publish', ['HTTP_ACCEPT' => 'application/json']));
+
+    expect($response->statusCode())->toBe(403)
+        ->and(json_decode($response->body(), true))->toBe(['message' => 'Forbidden.']);
+});
+
+it('never includes the ability or resource name in the 403 body', function (): void {
+    $router = createAuthorizedRouter(abilities: ['publish-secret-report' => false]);
+
+    $json = $router->handle(createRouterRequest('/posts/publish', ['HTTP_ACCEPT' => 'application/json']));
+    $html = $router->handle(createRouterRequest('/posts/publish', ['HTTP_ACCEPT' => 'text/html']));
+
+    expect($json->body())->not->toContain('publish-secret-report')
+        ->not->toContain('RouterSecretReport')
+        ->and($html->statusCode())->toBe(403)
+        ->and($html->body())->not->toContain('publish-secret-report')
+        ->not->toContain('RouterSecretReport')
+        ->not->toContain('published');
+});
+
+it('lets the controller run when Gate::authorize() allows the ability', function (): void {
+    $router = createAuthorizedRouter(abilities: ['publish-secret-report' => true]);
+
+    $response = $router->handle(createRouterRequest('/posts/publish'));
+
+    expect($response->statusCode())->toBe(200)
+        ->and($response->body())->toBe('published');
 });

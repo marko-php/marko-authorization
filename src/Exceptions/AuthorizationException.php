@@ -4,24 +4,32 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Exceptions;
 
-use Exception;
+use Marko\Core\Exceptions\HttpExceptionInterface;
+use Marko\Core\Exceptions\MarkoException;
 use Throwable;
 
-class AuthorizationException extends Exception
+/**
+ * The current user may not perform an ability.
+ *
+ * Rendered by the routing pipeline as 403 with a generic message: the
+ * ability and resource stay on the exception (for logs) and are never sent
+ * to the client.
+ */
+class AuthorizationException extends MarkoException implements HttpExceptionInterface
 {
     public function __construct(
-        string $message,
+        string $message = 'Forbidden',
         private readonly string $ability = '',
         private readonly string $resource = '',
-        private readonly string $context = '',
-        private readonly string $suggestion = '',
-        int $code = 0,
+        string $context = '',
+        string $suggestion = '',
         ?Throwable $previous = null,
     ) {
         parent::__construct(
-            $message,
-            $code,
-            $previous,
+            message: $message,
+            context: $context,
+            suggestion: $suggestion,
+            previous: $previous,
         );
     }
 
@@ -35,14 +43,25 @@ class AuthorizationException extends Exception
         return $this->resource;
     }
 
-    public function getContext(): string
+    public function getStatusCode(): int
     {
-        return $this->context;
+        return 403;
     }
 
-    public function getSuggestion(): string
+    /**
+     * @return array<string, string>
+     */
+    public function getHeaders(): array
     {
-        return $this->suggestion;
+        return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getResponseData(): array
+    {
+        return ['message' => 'Forbidden.'];
     }
 
     public static function forbidden(
@@ -55,19 +74,6 @@ class AuthorizationException extends Exception
             resource: $resource,
             context: "Unable to perform '$ability' on '$resource'",
             suggestion: 'You do not have permission to perform this action',
-        );
-    }
-
-    public static function missingPolicy(
-        string $entityClass,
-        string $ability,
-    ): self {
-        return new self(
-            message: "No policy registered for '$entityClass'",
-            ability: $ability,
-            resource: $entityClass,
-            context: "Attempted to check ability '$ability' on entity '$entityClass' but no policy is registered",
-            suggestion: "Register a policy for '$entityClass' using Gate::policy($entityClass, YourPolicyClass::class)",
         );
     }
 }

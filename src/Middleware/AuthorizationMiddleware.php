@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Middleware;
 
-use JsonException;
 use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Contracts\GateInterface;
+use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
+use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\Middleware\MiddlewareInterface;
@@ -21,6 +23,11 @@ use ReflectionMethod;
  * Reads the matched route from the request (set by the Router before the
  * pipeline runs). A method-level #[Can] overrides a class-level one. Routes
  * without #[Can] pass straight through.
+ *
+ * Failures are thrown, never rendered here: a guest gets an HttpException
+ * (401) and a denied user an AuthorizationException (403). The routing
+ * pipeline renders both through ExceptionRenderer, with content negotiation
+ * and any app-level renderer Preference.
  */
 class AuthorizationMiddleware implements MiddlewareInterface
 {
@@ -38,7 +45,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
     ) {}
 
     /**
-     * @throws ReflectionException|JsonException
+     * @throws AuthorizationException|HttpException|PolicyException|ReflectionException
      */
     public function handle(
         Request $request,
@@ -51,7 +58,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
         }
 
         if (!$this->guard->check()) {
-            return $this->unauthorizedResponse($request);
+            throw HttpException::unauthorized('Unauthorized.');
         }
 
         $arguments = [];
@@ -64,7 +71,10 @@ class AuthorizationMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
-        return $this->forbiddenResponse($request);
+        throw AuthorizationException::forbidden(
+            ability: $canAttribute->ability,
+            resource: $canAttribute->entityClass ?? $request->controller() . '::' . $request->action(),
+        );
     }
 
     /**
@@ -104,51 +114,5 @@ class AuthorizationMiddleware implements MiddlewareInterface
         }
 
         return $attributes === [] ? null : $attributes[0]->newInstance();
-    }
-
-    /**
-     * @throws JsonException
-     */
-    private function unauthorizedResponse(
-        Request $request,
-    ): Response {
-        if ($this->isJsonRequest($request)) {
-            return Response::json(
-                data: ['error' => 'Unauthorized'],
-                statusCode: 401,
-            );
-        }
-
-        return new Response(
-            body: 'Unauthorized',
-            statusCode: 401,
-        );
-    }
-
-    /**
-     * @throws JsonException
-     */
-    private function forbiddenResponse(
-        Request $request,
-    ): Response {
-        if ($this->isJsonRequest($request)) {
-            return Response::json(
-                data: ['error' => 'Forbidden'],
-                statusCode: 403,
-            );
-        }
-
-        return new Response(
-            body: 'Forbidden',
-            statusCode: 403,
-        );
-    }
-
-    private function isJsonRequest(
-        Request $request,
-    ): bool {
-        $accept = $request->header('Accept');
-
-        return $accept !== null && str_contains($accept, 'application/json');
     }
 }

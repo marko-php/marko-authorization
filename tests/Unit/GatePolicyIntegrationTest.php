@@ -6,6 +6,7 @@ namespace Marko\Authorization\Tests\Unit;
 
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
 use Marko\Authorization\Gate;
 use Marko\Authorization\PolicyRegistry;
 use Marko\Testing\Fake\FakeGuard;
@@ -187,10 +188,16 @@ it('handles authorize with entity policies throwing on denial', function (): voi
 
     $article = new Article(id: 1, authorId: 1);
 
-    // View is allowed
-    expect($gate->authorize('view', $article))->toBeTrue();
-
-    // Delete is denied - should throw
-    expect(fn () => $gate->authorize('delete', $article))
+    // View is allowed; delete is denied and throws
+    expect($gate->authorize('view', $article))->toBeTrue()
+        ->and(fn () => $gate->authorize('delete', $article))
         ->toThrow(AuthorizationException::class);
+});
+
+it('throws PolicyException when the policy method does not exist', function (): void {
+    $gate = createIntegrationGate();
+    $gate->policy(Article::class, ArticlePolicy::class);
+
+    expect(fn () => $gate->allows('publish', new Article(id: 1, authorId: 1)))
+        ->toThrow(PolicyException::class, "does not have a 'publish' method");
 });

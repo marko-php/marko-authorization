@@ -4,50 +4,49 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Unit\Exceptions;
 
-use Exception;
 use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
+use Marko\Core\Exceptions\HttpExceptionInterface;
+use Marko\Core\Exceptions\MarkoException;
 
-it('creates AuthorizationException with ability and resource context', function (): void {
-    $exception = new AuthorizationException(
-        message: 'Forbidden',
-        ability: 'update',
-        resource: 'Post',
-    );
-
-    expect($exception)->toBeInstanceOf(Exception::class)
-        ->and($exception->getMessage())->toBe('Forbidden')
-        ->and($exception->getAbility())->toBe('update')
-        ->and($exception->getResource())->toBe('Post');
-});
-
-it('creates AuthorizationException via forbidden factory method', function (): void {
+it('implements HttpExceptionInterface with a 403 status and no headers', function (): void {
     $exception = AuthorizationException::forbidden(
         ability: 'delete',
         resource: 'Comment',
     );
 
-    expect($exception)->toBeInstanceOf(AuthorizationException::class)
-        ->and($exception->getMessage())->toBe('Forbidden')
-        ->and($exception->getAbility())->toBe('delete')
-        ->and($exception->getResource())->toBe('Comment')
-        ->and($exception->getContext())->toContain('delete')
-        ->and($exception->getContext())->toContain('Comment');
+    expect($exception)->toBeInstanceOf(HttpExceptionInterface::class)
+        ->toBeInstanceOf(MarkoException::class)
+        ->and($exception->getStatusCode())->toBe(403)
+        ->and($exception->getHeaders())->toBeEmpty();
 });
 
-it('creates AuthorizationException via missingPolicy factory method', function (): void {
-    $exception = AuthorizationException::missingPolicy(
-        entityClass: 'App\\Entity\\Post',
-        ability: 'update',
+it('never exposes the ability or resource name in the response data', function (): void {
+    $exception = AuthorizationException::forbidden(
+        ability: 'delete-secret-thing',
+        resource: 'App\\Entity\\InternalLedger',
     );
 
-    expect($exception)->toBeInstanceOf(AuthorizationException::class)
-        ->and($exception->getMessage())->toContain('No policy')
-        ->and($exception->getContext())->toContain('App\\Entity\\Post')
-        ->and($exception->getContext())->toContain('update')
-        ->and($exception->getSuggestion())->toContain('policy');
+    $encoded = json_encode($exception->getResponseData(), JSON_THROW_ON_ERROR);
+
+    expect($exception->getResponseData())->toBe(['message' => 'Forbidden.'])
+        ->and($encoded)->not->toContain('delete-secret-thing')
+        ->not->toContain('InternalLedger');
 });
 
-it('provides context and suggestion on AuthorizationException', function (): void {
+it('keeps the ability and resource for logging', function (): void {
+    $exception = AuthorizationException::forbidden(
+        ability: 'delete',
+        resource: 'Comment',
+    );
+
+    expect($exception->getAbility())->toBe('delete')
+        ->and($exception->getResource())->toBe('Comment')
+        ->and($exception->getContext())->toContain('delete')
+        ->toContain('Comment');
+});
+
+it('forwards context and suggestion to MarkoException', function (): void {
     $exception = new AuthorizationException(
         message: 'Access denied',
         ability: 'create',
@@ -56,8 +55,42 @@ it('provides context and suggestion on AuthorizationException', function (): voi
         suggestion: 'Ensure the user has the create ability or register a policy',
     );
 
-    expect($exception->getContext())->toBe('User lacks create permission on Article')
+    expect($exception->getMessage())->toBe('Access denied')
+        ->and($exception->getContext())->toBe('User lacks create permission on Article')
         ->and($exception->getSuggestion())->toBe('Ensure the user has the create ability or register a policy')
         ->and($exception->getAbility())->toBe('create')
         ->and($exception->getResource())->toBe('Article');
+});
+
+it('defaults the message to Forbidden', function (): void {
+    $exception = new AuthorizationException();
+
+    expect($exception->getMessage())->toBe('Forbidden')
+        ->and($exception->getAbility())->toBe('')
+        ->and($exception->getResource())->toBe('');
+});
+
+it('does not implement HttpExceptionInterface on PolicyException', function (): void {
+    $exception = PolicyException::missingMethod(
+        policyClass: 'App\\Policy\\PostPolicy',
+        ability: 'publish',
+    );
+
+    expect($exception)->toBeInstanceOf(MarkoException::class)
+        ->not->toBeInstanceOf(HttpExceptionInterface::class)
+        ->and($exception->getMessage())->toContain('App\\Policy\\PostPolicy')
+        ->toContain('publish')
+        ->and($exception->getSuggestion())->toContain('publish');
+});
+
+it('describes a duplicate policy registration on PolicyException', function (): void {
+    $exception = PolicyException::duplicatePolicy(
+        entityClass: 'App\\Entity\\Post',
+        policyClass: 'App\\Policy\\NewPostPolicy',
+        existing: 'App\\Policy\\PostPolicy',
+    );
+
+    expect($exception->getMessage())->toContain('App\\Entity\\Post')
+        ->and($exception->getContext())->toContain('App\\Policy\\NewPostPolicy')
+        ->toContain('App\\Policy\\PostPolicy');
 });

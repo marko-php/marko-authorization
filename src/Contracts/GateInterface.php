@@ -6,6 +6,7 @@ namespace Marko\Authorization\Contracts;
 
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
 
 interface GateInterface
 {
@@ -21,6 +22,8 @@ interface GateInterface
 
     /**
      * Check if the given ability is allowed.
+     *
+     * @throws PolicyException When the matching policy has no method for the ability
      */
     public function allows(
         string $ability,
@@ -29,6 +32,8 @@ interface GateInterface
 
     /**
      * Check if the given ability is denied.
+     *
+     * @throws PolicyException When the matching policy has no method for the ability
      */
     public function denies(
         string $ability,
@@ -38,7 +43,10 @@ interface GateInterface
     /**
      * Authorize the given ability. Throws on denial.
      *
-     * @throws AuthorizationException
+     * The thrown AuthorizationException implements HttpExceptionInterface,
+     * so an uncaught denial in a controller renders as a 403.
+     *
+     * @throws AuthorizationException|PolicyException
      */
     public function authorize(
         string $ability,
@@ -50,6 +58,7 @@ interface GateInterface
      *
      * @param class-string $entityClass
      * @param class-string $policyClass
+     * @throws PolicyException When a policy is already registered for the entity
      */
     public function policy(
         string $entityClass,

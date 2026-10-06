@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Marko\Authorization\Tests\Unit;
 
 use Marko\Authorization\AuthorizableInterface;
-use Marko\Authorization\Exceptions\AuthorizationException;
+use Marko\Authorization\Exceptions\PolicyException;
 use Marko\Authorization\PolicyRegistry;
 
 // Test entity class
@@ -142,7 +142,7 @@ it('returns the boolean result from the policy method', function (): void {
         ->and($policy->delete(null, $post))->toBeFalse();
 });
 
-it('throws AuthorizationException when policy method does not exist', function (): void {
+it('reports a missing policy method as no ability', function (): void {
     $registry = new PolicyRegistry();
 
     expect($registry->hasAbility(TestPostPolicy::class, 'publish'))->toBeFalse();
@@ -153,5 +153,5 @@ it('prevents registering duplicate policies for the same entity', function (): v
     $registry->register(TestPost::class, TestPostPolicy::class);
 
     expect(fn () => $registry->register(TestPost::class, TestPostPolicy::class))
-        ->toThrow(AuthorizationException::class);
+        ->toThrow(PolicyException::class, 'A policy is already registered');
 });

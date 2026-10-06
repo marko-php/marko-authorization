@@ -132,12 +132,18 @@ it('returns false for undefined abilities', function (): void {
         ->and($gate->denies('nonexistent'))->toBeTrue();
 });
 
-it('throws AuthorizationException from authorize when denied', function (): void {
+it('throws a 403 AuthorizationException from authorize when denied', function (): void {
     $gate = createGate();
     $gate->define('delete-all', fn (?AuthorizableInterface $user): bool => false);
 
-    expect(fn () => $gate->authorize('delete-all'))
-        ->toThrow(AuthorizationException::class);
+    try {
+        $gate->authorize('delete-all');
+        $this->fail('Expected AuthorizationException');
+    } catch (AuthorizationException $exception) {
+        expect($exception->getStatusCode())->toBe(403)
+            ->and($exception->getAbility())->toBe('delete-all')
+            ->and($exception->getResponseData())->toBe(['message' => 'Forbidden.']);
+    }
 });
 
 it('returns true from authorize when allowed', function (): void {

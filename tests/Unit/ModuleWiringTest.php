@@ -18,6 +18,7 @@ use Marko\Core\Container\Container;
 use Marko\Core\Module\DependencyResolver;
 use Marko\Core\Module\GlobalMiddlewareResolver;
 use Marko\Core\Module\ModuleManifest;
+use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Testing\Fake\FakeAuthenticatable;
@@ -174,8 +175,7 @@ it('builds the middleware with the guard configured for authorization', function
     $request = new Request()->withRoute(WiringController::class, 'edit');
 
     // The default guard is logged in but the authorization guard ('api') is not, so 401 proves which guard is used.
-    $response = $middleware->handle($request, fn (Request $r): Response => new Response(body: 'edited'));
-
     expect($middleware)->toBeInstanceOf(AuthorizationMiddleware::class)
-        ->and($response->statusCode())->toBe(401);
+        ->and(fn () => $middleware->handle($request, fn (Request $r): Response => new Response(body: 'edited')))
+        ->toThrow(HttpException::class, 'Unauthorized.');
 });
