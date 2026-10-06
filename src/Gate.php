@@ -4,11 +4,22 @@ declare(strict_types=1);
 
 namespace Marko\Authorization;
 
+use Marko\Authentication\Contracts\AbilityScopedGuardInterface;
 use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
 use Marko\Authorization\Exceptions\PolicyException;
 
+/**
+ * Decides abilities through gate closures, then registered policies, and
+ * denies anything undefined.
+ *
+ * When the guard is an AbilityScopedGuardInterface (the token guard), an
+ * authenticated user's credential must also grant the ability: a token
+ * scoped to ['posts:read'] is denied 'posts:delete' even when the user's
+ * closure or policy would allow it. Guests are not affected, so closures
+ * and policies that allow guests keep working.
+ */
 class Gate implements GateInterface
 {
     /** @var array<string, callable> */
@@ -34,6 +45,12 @@ class Gate implements GateInterface
         mixed ...$arguments,
     ): bool {
         $user = $this->resolveUser();
+
+        // A scoped credential (an API token) can only narrow the user's authority
+        if ($user !== null && $this->guard instanceof AbilityScopedGuardInterface
+            && !$this->guard->hasAbility($ability)) {
+            return false;
+        }
 
         // Check explicit gate closures first
         if (isset($this->abilities[$ability])) {

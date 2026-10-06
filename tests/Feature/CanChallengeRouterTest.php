@@ -79,10 +79,18 @@ class ChallengeStubUser implements AuthorizableInterface
 }
 
 /**
- * Knows exactly one token, "valid-token", belonging to ChallengeStubUser.
+ * Knows three tokens belonging to ChallengeStubUser: "valid-token" (no
+ * abilities, so full access), "reports-token" (scoped to view-reports) and
+ * "read-only-token" (scoped to posts:read).
  */
 class ChallengeTokenRepository implements TokenRepositoryInterface
 {
+    private const array ABILITIES = [
+        'valid-token' => null,
+        'reports-token' => ['view-reports'],
+        'read-only-token' => ['posts:read'],
+    ];
+
     public function find(
         int $id,
     ): ?PersonalAccessToken {
@@ -92,17 +100,22 @@ class ChallengeTokenRepository implements TokenRepositoryInterface
     public function findByToken(
         string $tokenHash,
     ): ?PersonalAccessToken {
-        if (!hash_equals(hash('sha256', 'valid-token'), $tokenHash)) {
-            return null;
+        foreach (self::ABILITIES as $rawToken => $abilities) {
+            if (!hash_equals(hash('sha256', $rawToken), $tokenHash)) {
+                continue;
+            }
+
+            $token = new PersonalAccessToken();
+            $token->id = 1;
+            $token->tokenableType = ChallengeStubUser::class;
+            $token->tokenableId = 7;
+            $token->tokenHash = $tokenHash;
+            $token->abilities = $abilities !== null ? json_encode($abilities) : null;
+
+            return $token;
         }
 
-        $token = new PersonalAccessToken();
-        $token->id = 1;
-        $token->tokenableType = ChallengeStubUser::class;
-        $token->tokenableId = 7;
-        $token->tokenHash = $tokenHash;
-
-        return $token;
+        return null;
     }
 
     public function create(
@@ -224,6 +237,23 @@ it('returns 200 through the router for a Can route on the token guard with a val
 
     expect($response->statusCode())->toBe(200)
         ->and($response->body())->toBe('reports');
+});
+
+it('returns 200 for a Can route when the token is scoped to that ability', function (): void {
+    $response = createTokenGuardRouter()->handle(
+        createChallengeRequest(['HTTP_AUTHORIZATION' => 'Bearer reports-token']),
+    );
+
+    expect($response->statusCode())->toBe(200);
+});
+
+it('returns 403 for a Can route when the token is not scoped to that ability', function (): void {
+    $response = createTokenGuardRouter()->handle(
+        createChallengeRequest(['HTTP_AUTHORIZATION' => 'Bearer read-only-token']),
+    );
+
+    expect($response->statusCode())->toBe(403)
+        ->and(json_decode($response->body(), true))->toBe(['message' => 'Forbidden.']);
 });
 
 it('returns 401 without WWW-Authenticate through the router for a guest on a session-style guard', function (): void {

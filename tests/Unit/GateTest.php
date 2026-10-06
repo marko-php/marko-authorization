@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Unit;
 
+use Marko\Authentication\Contracts\AbilityScopedGuardInterface;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
@@ -52,6 +53,44 @@ class StubUser implements AuthorizableInterface
         mixed ...$arguments,
     ): bool {
         return false;
+    }
+}
+
+/**
+ * A guard whose credential (like an API token) grants only the listed abilities.
+ */
+class ScopedFakeGuard extends FakeGuard implements AbilityScopedGuardInterface
+{
+    /** @var array<string> */
+    public array $checkedAbilities = [];
+
+    /**
+     * @param array<string> $grantedAbilities
+     */
+    public function __construct(
+        private readonly array $grantedAbilities,
+    ) {
+        parent::__construct(name: 'api', attemptResult: false);
+    }
+
+    public function hasAbility(
+        string $ability,
+    ): bool {
+        $this->checkedAbilities[] = $ability;
+
+        return in_array($ability, $this->grantedAbilities, true);
+    }
+}
+
+class ScopedPost {}
+
+class ScopedPostPolicy
+{
+    public function update(
+        ?AuthorizableInterface $user,
+        ScopedPost $post,
+    ): bool {
+        return true;
     }
 }
 
@@ -177,4 +216,62 @@ it('allows overwriting previously defined abilities', function (): void {
 
     $gate->define('edit-post', fn (?AuthorizableInterface $user): bool => true);
     expect($gate->allows('edit-post'))->toBeTrue();
+});
+
+describe('ability-scoped guards (API tokens)', function (): void {
+    it('denies an ability the credential does not grant even when the closure allows it', function (): void {
+        $guard = new ScopedFakeGuard(['posts:read']);
+        $guard->setUser(new StubUser());
+        $gate = createGate(guard: $guard);
+        $gate->define('posts:delete', fn (?AuthorizableInterface $user): bool => true);
+
+        expect($gate->allows('posts:delete'))->toBeFalse()
+            ->and($gate->denies('posts:delete'))->toBeTrue()
+            ->and($guard->checkedAbilities)->toBe(['posts:delete', 'posts:delete']);
+    });
+
+    it('allows an ability the credential grants when the closure allows it', function (): void {
+        $guard = new ScopedFakeGuard(['posts:read']);
+        $guard->setUser(new StubUser());
+        $gate = createGate(guard: $guard);
+        $gate->define('posts:read', fn (?AuthorizableInterface $user): bool => true);
+
+        expect($gate->allows('posts:read'))->toBeTrue();
+    });
+
+    it('still denies when the credential grants the ability but the closure denies it', function (): void {
+        $guard = new ScopedFakeGuard(['posts:read']);
+        $guard->setUser(new StubUser());
+        $gate = createGate(guard: $guard);
+        $gate->define('posts:read', fn (?AuthorizableInterface $user): bool => false);
+
+        expect($gate->allows('posts:read'))->toBeFalse();
+    });
+
+    it('denies an ability the credential does not grant even when a policy allows it', function (): void {
+        $guard = new ScopedFakeGuard([]);
+        $guard->setUser(new StubUser());
+        $gate = createGate(guard: $guard);
+        $gate->policy(ScopedPost::class, ScopedPostPolicy::class);
+
+        expect($gate->allows('update', new ScopedPost()))->toBeFalse();
+    });
+
+    it('throws a 403 from authorize when the credential lacks the ability', function (): void {
+        $guard = new ScopedFakeGuard([]);
+        $guard->setUser(new StubUser());
+        $gate = createGate(guard: $guard);
+        $gate->define('reports:export', fn (?AuthorizableInterface $user): bool => true);
+
+        expect(fn () => $gate->authorize('reports:export'))->toThrow(AuthorizationException::class);
+    });
+
+    it('does not consult the credential for a guest', function (): void {
+        $guard = new ScopedFakeGuard([]);
+        $gate = createGate(guard: $guard);
+        $gate->define('public-page', fn (?AuthorizableInterface $user): bool => true);
+
+        expect($gate->allows('public-page'))->toBeTrue()
+            ->and($guard->checkedAbilities)->toBe([]);
+    });
 });
