@@ -12,6 +12,7 @@ use Marko\Authorization\Gate;
 use Marko\Authorization\Middleware\AuthorizationMiddleware;
 use Marko\Authorization\PolicyRegistry;
 use Marko\Core\Container\Container;
+use Marko\Core\Exceptions\BindingException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\RouteCollection;
@@ -123,6 +124,20 @@ function createAuthorizedRouter(
     array $abilities,
     bool $authenticated = true,
 ): Router {
+    return new Router(
+        matcher: new RouteMatcher(createRouterRoutes()),
+        container: createAuthorizedContainer($abilities, $authenticated),
+        globalMiddleware: [AuthorizationMiddleware::class],
+    );
+}
+
+/**
+ * @param array<string, bool> $abilities
+ */
+function createAuthorizedContainer(
+    array $abilities,
+    bool $authenticated,
+): Container {
     $guard = new FakeGuard(name: 'web', attemptResult: false);
 
     if ($authenticated) {
@@ -141,7 +156,19 @@ function createAuthorizedRouter(
     $container = new Container();
     $container->instance(GuardInterface::class, $guard);
     $container->instance(GateInterface::class, $gate);
+    $container->bind(
+        AuthorizationMiddleware::class,
+        fn (): AuthorizationMiddleware => new AuthorizationMiddleware(
+            gate: fn (): GateInterface => $gate,
+            guard: fn (): GuardInterface => $guard,
+        ),
+    );
 
+    return $container;
+}
+
+function createRouterRoutes(): RouteCollection
+{
     $routes = new RouteCollection();
     $routes->add(new RouteDefinition(
         method: 'GET',
@@ -174,8 +201,29 @@ function createAuthorizedRouter(
         action: 'reports',
     ));
 
+    return $routes;
+}
+
+/**
+ * Build a Router whose container holds only marko/authorization's own module
+ * bindings: no AuthManager, guard, session or authentication config.
+ */
+function createUnconfiguredRouter(): Router
+{
+    /** @var array{bindings: array<string, callable>, singletons: list<string>} $module */
+    $module = require dirname(__DIR__, 2) . '/module.php';
+    $container = new Container();
+
+    foreach ($module['bindings'] as $id => $factory) {
+        $container->bind($id, $factory);
+    }
+
+    foreach ($module['singletons'] as $id) {
+        $container->singleton($id);
+    }
+
     return new Router(
-        matcher: new RouteMatcher($routes),
+        matcher: new RouteMatcher(createRouterRoutes()),
         container: $container,
         globalMiddleware: [AuthorizationMiddleware::class],
     );
@@ -292,4 +340,24 @@ it('lets the controller run when Gate::authorize() allows the ability', function
 
     expect($response->statusCode())->toBe(200)
         ->and($response->body())->toBe('published');
+});
+
+it('returns 200 for a route without Can when no auth or session is configured', function (): void {
+    $response = createUnconfiguredRouter()->handle(createRouterRequest('/posts'));
+
+    expect($response->statusCode())->toBe(200)
+        ->and($response->body())->toBe('index');
+});
+
+it('returns 404 for an unmatched request when no auth or session is configured', function (): void {
+    $response = createUnconfiguredRouter()->handle(createRouterRequest('/missing'));
+
+    expect($response->statusCode())->toBe(404);
+});
+
+it('fails loudly on a Can route when no auth or session is configured', function (): void {
+    $router = createUnconfiguredRouter();
+
+    expect(fn () => $router->handle(createRouterRequest('/posts/edit')))
+        ->toThrow(BindingException::class);
 });

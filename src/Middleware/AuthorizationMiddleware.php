@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Middleware;
 
+use Closure;
 use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Contracts\GateInterface;
@@ -24,6 +25,11 @@ use ReflectionMethod;
  * pipeline runs). A method-level #[Can] overrides a class-level one. Routes
  * without #[Can] pass straight through.
  *
+ * The Gate and the guard are built lazily, the first time a route with
+ * #[Can] is matched. Routes without #[Can] (and unmatched requests) never
+ * construct them, so they cost nothing and need no authentication or
+ * session configuration.
+ *
  * Failures are thrown, never rendered here: a guest gets an HttpException
  * (401) and a denied user an AuthorizationException (403). The routing
  * pipeline renders both through ExceptionRenderer, with content negotiation
@@ -39,9 +45,17 @@ class AuthorizationMiddleware implements MiddlewareInterface
      */
     private array $resolved = [];
 
+    private ?GateInterface $resolvedGate = null;
+
+    private ?GuardInterface $resolvedGuard = null;
+
+    /**
+     * @param Closure(): GateInterface $gate Called once, on the first route with #[Can]
+     * @param Closure(): GuardInterface $guard Called once, on the first route with #[Can]
+     */
     public function __construct(
-        private readonly GateInterface $gate,
-        private readonly GuardInterface $guard,
+        private readonly Closure $gate,
+        private readonly Closure $guard,
     ) {}
 
     /**
@@ -57,7 +71,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
-        if (!$this->guard->check()) {
+        if (!$this->guard()->check()) {
             throw HttpException::unauthorized('Unauthorized.');
         }
 
@@ -67,7 +81,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
             $arguments[] = $canAttribute->entityClass;
         }
 
-        if ($this->gate->allows($canAttribute->ability, ...$arguments)) {
+        if ($this->gate()->allows($canAttribute->ability, ...$arguments)) {
             return $next($request);
         }
 
@@ -75,6 +89,16 @@ class AuthorizationMiddleware implements MiddlewareInterface
             ability: $canAttribute->ability,
             resource: $canAttribute->entityClass ?? $request->controller() . '::' . $request->action(),
         );
+    }
+
+    private function gate(): GateInterface
+    {
+        return $this->resolvedGate ??= ($this->gate)();
+    }
+
+    private function guard(): GuardInterface
+    {
+        return $this->resolvedGuard ??= ($this->guard)();
     }
 
     /**

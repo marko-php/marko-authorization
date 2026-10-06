@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Marko\Authentication\AuthManager;
+use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Config\AuthorizationConfig;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Gate;
@@ -26,14 +27,14 @@ return [
                 policyRegistry: $container->get(PolicyRegistry::class),
             );
         },
-        // Check authentication against the same guard the Gate authorizes with.
+        // Lazy: the Gate and guard are built only when a route with #[Can] is matched.
+        // Authentication is checked against the same guard the Gate authorizes with.
         AuthorizationMiddleware::class => function (ContainerInterface $container): AuthorizationMiddleware {
-            $authManager = $container->get(AuthManager::class);
-            $config = $container->get(AuthorizationConfig::class);
-
             return new AuthorizationMiddleware(
-                gate: $container->get(GateInterface::class),
-                guard: $authManager->guard($config->defaultGuard()),
+                gate: fn (): GateInterface => $container->get(GateInterface::class),
+                guard: fn (): GuardInterface => $container->get(AuthManager::class)->guard(
+                    $container->get(AuthorizationConfig::class)->defaultGuard(),
+                ),
             );
         },
     ],

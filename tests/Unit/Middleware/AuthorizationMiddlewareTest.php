@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Unit\Middleware;
 
+use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
@@ -15,6 +16,7 @@ use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Testing\Fake\FakeGuard;
+use RuntimeException;
 
 // Test controllers
 class PostController
@@ -98,9 +100,41 @@ function createAuthMiddleware(
     FakeGuard $guard,
 ): AuthorizationMiddleware {
     return new AuthorizationMiddleware(
-        gate: $gate,
-        guard: $guard,
+        gate: fn (): GateInterface => $gate,
+        guard: fn (): GuardInterface => $guard,
     );
+}
+
+/**
+ * Counts how often each factory runs. The factories fail the test if a
+ * route without #[Can] ever calls them.
+ */
+class FactorySpy
+{
+    public int $gateCalls = 0;
+
+    public int $guardCalls = 0;
+
+    public function __construct(
+        private readonly GateInterface $gate,
+        private readonly GuardInterface $guard,
+    ) {}
+
+    public function middleware(): AuthorizationMiddleware
+    {
+        return new AuthorizationMiddleware(
+            gate: function (): GateInterface {
+                $this->gateCalls++;
+
+                return $this->gate;
+            },
+            guard: function (): GuardInterface {
+                $this->guardCalls++;
+
+                return $this->guard;
+            },
+        );
+    }
 }
 
 /**
@@ -271,4 +305,80 @@ it('reuses the resolved Can attribute for repeated requests to the same action',
 
     expect($denied)->toBe(2)
         ->and($unprotected->statusCode())->toBe(200);
+});
+
+it('never calls the gate or guard factory for a route without Can', function (): void {
+    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
+    $spy = new FactorySpy(gate: createMiddlewareGate(guard: $guard), guard: $guard);
+    $middleware = $spy->middleware();
+
+    $response = $middleware->handle(createRoutedRequest('index'), createSuccessfulNext());
+
+    expect($response->statusCode())->toBe(200)
+        ->and($spy->gateCalls)->toBe(0)
+        ->and($spy->guardCalls)->toBe(0);
+});
+
+it('never calls the gate or guard factory for an unmatched request', function (): void {
+    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
+    $spy = new FactorySpy(gate: createMiddlewareGate(guard: $guard), guard: $guard);
+    $middleware = $spy->middleware();
+
+    $response = $middleware->handle(new Request(), createSuccessfulNext());
+
+    expect($response->statusCode())->toBe(200)
+        ->and($spy->gateCalls)->toBe(0)
+        ->and($spy->guardCalls)->toBe(0);
+});
+
+it('resolves the gate and guard once across repeated Can requests', function (): void {
+    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
+    $guard->setUser(new MiddlewareStubUser());
+    $gate = createMiddlewareGate(guard: $guard);
+    $gate->define('create-post', fn (?AuthorizableInterface $user): bool => true);
+    $spy = new FactorySpy(gate: $gate, guard: $guard);
+    $middleware = $spy->middleware();
+
+    $first = $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+    $second = $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+
+    expect($first->statusCode())->toBe(200)
+        ->and($second->statusCode())->toBe(200)
+        ->and($spy->gateCalls)->toBe(1)
+        ->and($spy->guardCalls)->toBe(1);
+});
+
+it('never calls the gate factory when the guard reports a guest', function (): void {
+    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false); // No user set
+    $spy = new FactorySpy(gate: createMiddlewareGate(guard: $guard), guard: $guard);
+    $middleware = $spy->middleware();
+
+    expect(fn () => $middleware->handle(createRoutedRequest('create'), createSuccessfulNext()))
+        ->toThrow(HttpException::class)
+        ->and($spy->guardCalls)->toBe(1)
+        ->and($spy->gateCalls)->toBe(0);
+});
+
+it('retries a factory that threw on the next Can request instead of caching the failure', function (): void {
+    $guard = new FakeGuard(name: 'middleware-test', attemptResult: false);
+    $guard->setUser(new MiddlewareStubUser());
+    $gate = createMiddlewareGate(guard: $guard);
+    $gate->define('create-post', fn (?AuthorizableInterface $user): bool => true);
+    $guardCalls = 0;
+
+    $middleware = new AuthorizationMiddleware(
+        gate: fn (): GateInterface => $gate,
+        guard: function () use (&$guardCalls, $guard): GuardInterface {
+            if (++$guardCalls === 1) {
+                throw new RuntimeException('Guard not configured yet');
+            }
+
+            return $guard;
+        },
+    );
+
+    expect(fn () => $middleware->handle(createRoutedRequest('create'), createSuccessfulNext()))
+        ->toThrow(RuntimeException::class, 'Guard not configured yet')
+        ->and($middleware->handle(createRoutedRequest('create'), createSuccessfulNext())->statusCode())->toBe(200)
+        ->and($guardCalls)->toBe(2);
 });
