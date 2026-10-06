@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Feature;
 
+use DateTimeImmutable;
 use Marko\Authentication\AuthManager;
 use Marko\Authentication\Exceptions\AuthException;
 use Marko\Authorization\AuthorizableInterface;
@@ -38,6 +39,15 @@ class CanBootUser implements AuthorizableInterface
 
     public function setRememberToken(
         ?string $token,
+    ): void {}
+
+    public function getRememberTokenExpiresAt(): ?DateTimeImmutable
+    {
+        return null;
+    }
+
+    public function setRememberTokenExpiresAt(
+        ?DateTimeImmutable $expiresAt,
     ): void {}
 
     public function getRememberTokenName(): string

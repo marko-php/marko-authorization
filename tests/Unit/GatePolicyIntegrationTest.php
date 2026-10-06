@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Unit;
 
+use DateTimeImmutable;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
 use Marko\Authorization\Exceptions\PolicyException;
@@ -73,6 +74,15 @@ class IntegrationStubUser implements AuthorizableInterface
 
     public function setRememberToken(
         ?string $token,
+    ): void {}
+
+    public function getRememberTokenExpiresAt(): ?DateTimeImmutable
+    {
+        return null;
+    }
+
+    public function setRememberTokenExpiresAt(
+        ?DateTimeImmutable $expiresAt,
     ): void {}
 
     public function getRememberTokenName(): string
