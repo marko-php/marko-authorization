@@ -8,6 +8,8 @@ use Closure;
 use Marko\Authentication\AuthManager;
 use Marko\Authentication\Config\AuthConfig;
 use Marko\Authentication\Contracts\GuardInterface;
+use Marko\Authentication\Exceptions\AuthException;
+use Marko\Authentication\Token\RememberTokenManager;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Config\AuthorizationConfig;
 use Marko\Authorization\Contracts\GateInterface;
@@ -19,8 +21,13 @@ use Marko\Authorization\Routing\CanRouteFinder;
 use Marko\Core\Container\Container;
 use Marko\Routing\RouteCollection;
 use Marko\Routing\RouteDefinition;
+use Marko\Testing\Fake\FakeClock;
 use Marko\Testing\Fake\FakeConfigRepository;
+use Marko\Testing\Fake\FakeCookieJar;
+use Marko\Testing\Fake\FakeEventDispatcher;
 use Marko\Testing\Fake\FakeGuard;
+use Marko\Testing\Fake\FakeSession;
+use Marko\Testing\Fake\FakeUserProvider;
 use RuntimeException;
 
 class ValidatorController
@@ -172,4 +179,65 @@ it('throws when the policy registry cannot be built', function (): void {
 
     expect(fn () => canValidator($container)->validate(validatorRoutes('edit')))
         ->toThrow(AuthorizationConfigurationException::class, 'Registry broken');
+});
+
+/**
+ * A container holding a real AuthManager built from $config, with fakes for
+ * everything the session guard needs.
+ *
+ * @param array<string, mixed> $config
+ */
+function validatorContainerWithRealAuthManager(
+    array $config,
+): Container {
+    $configRepository = new FakeConfigRepository([
+        'authentication.remember.cookie.prefix' => 'remember_',
+        'authentication.guards' => [
+            'web' => ['driver' => 'session', 'provider' => 'users'],
+        ],
+        ...$config,
+    ]);
+    $authConfig = new AuthConfig($configRepository);
+    $container = new Container();
+    $container->instance(AuthConfig::class, $authConfig);
+    $container->instance(AuthorizationConfig::class, new AuthorizationConfig($configRepository));
+    $container->instance(AuthManager::class, new AuthManager(
+        config: $authConfig,
+        session: new FakeSession(),
+        provider: new FakeUserProvider(),
+        eventDispatcher: new FakeEventDispatcher(),
+        cookieJar: new FakeCookieJar(),
+        rememberTokenManager: new RememberTokenManager(new FakeClock()),
+    ));
+
+    return $container;
+}
+
+it('throws AuthorizationConfigurationException wrapping AuthException when the default guard is not configured', function (): void {
+    $container = validatorContainerWithRealAuthManager([
+        'authorization.default_guard' => null,
+        'authentication.default.guard' => 'wbe',
+    ]);
+
+    try {
+        canValidator($container)->validate(validatorRoutes('edit'));
+        $this->fail('Expected AuthorizationConfigurationException');
+    } catch (AuthorizationConfigurationException $e) {
+        $previous = $e->getPrevious();
+
+        expect($e->getMessage())->toContain("guard 'wbe'")
+            ->toContain('is not defined in authentication.guards')
+            ->and($previous)->toBeInstanceOf(AuthException::class)
+            ->and($previous instanceof AuthException ? $previous->getContext() : '')->toContain('Configured guards: web');
+    }
+});
+
+it('throws when authorization.default_guard names a guard missing from authentication.guards', function (): void {
+    $container = validatorContainerWithRealAuthManager([
+        'authorization.default_guard' => 'apii',
+        'authentication.default.guard' => 'web',
+    ]);
+
+    expect(fn () => canValidator($container)->validate(validatorRoutes('edit')))
+        ->toThrow(AuthorizationConfigurationException::class, "guard 'apii' cannot be built: Guard 'apii' is not defined");
 });

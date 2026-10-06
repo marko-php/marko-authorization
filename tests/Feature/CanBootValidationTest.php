@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marko\Authorization\Tests\Feature;
 
 use Marko\Authentication\AuthManager;
+use Marko\Authentication\Exceptions\AuthException;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationConfigurationException;
@@ -60,7 +61,10 @@ class CanBootUser implements AuthorizableInterface
  * unless a file named `broken-auth` exists in the project root: then binding
  * the user provider throws, which makes the guard impossible to build.
  *
- * @param array{can?: bool, excluded?: bool, token?: bool, customDriver?: bool} $options
+ * `defaultGuard` sets authentication.default.guard, overriding the guard the
+ * other options pick, for example to a name missing from authentication.guards.
+ *
+ * @param array{can?: bool, excluded?: bool, token?: bool, customDriver?: bool, defaultGuard?: string} $options
  * @return array{base: string, namespace: string}
  */
 function canBootProject(
@@ -113,6 +117,8 @@ function canBootProject(
                 },
             PHP;
     }
+
+    $guard = $options['defaultGuard'] ?? $guard;
 
     $brokenFlag = var_export("$base/broken-auth", true);
     file_put_contents("$base/app/shop/module.php", <<<PHP
@@ -284,6 +290,21 @@ describe('#[Can] boot validation', function (): void {
         } catch (AuthorizationConfigurationException $e) {
             expect($e->getMessage())->toContain("guard 'session'")
                 ->toContain('No user provider configured')
+                ->and($e->getContext())->toContain($project['namespace'] . '\\AdminController::dashboard');
+        }
+    });
+
+    it('fails a live boot when a Can route exists and the default guard is not configured', function (): void {
+        // 'sesion' is in neither the app's nor the package's authentication.guards.
+        $project = $this->projects[] = canBootProject(['can' => true, 'defaultGuard' => 'sesion']);
+
+        try {
+            canBootApplication($project['base'])->initialize();
+            $this->fail('Expected AuthorizationConfigurationException');
+        } catch (AuthorizationConfigurationException $e) {
+            expect($e->getMessage())->toContain("guard 'sesion'")
+                ->toContain("Guard 'sesion' is not defined in authentication.guards")
+                ->and($e->getPrevious())->toBeInstanceOf(AuthException::class)
                 ->and($e->getContext())->toContain($project['namespace'] . '\\AdminController::dashboard');
         }
     });
