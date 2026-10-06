@@ -10,13 +10,12 @@ use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
 use Marko\Authorization\Exceptions\PolicyException;
+use Marko\Authorization\Routing\CanAttributeReader;
 use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\Middleware\MiddlewareInterface;
-use ReflectionClass;
 use ReflectionException;
-use ReflectionMethod;
 
 /**
  * Enforces #[Can] on the matched controller action.
@@ -56,6 +55,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
     public function __construct(
         private readonly Closure $gate,
         private readonly Closure $guard,
+        private readonly CanAttributeReader $canAttributeReader = new CanAttributeReader(),
     ) {}
 
     /**
@@ -117,26 +117,9 @@ class AuthorizationMiddleware implements MiddlewareInterface
         $key = $controller . '::' . $action;
 
         if (!array_key_exists($key, $this->resolved)) {
-            $this->resolved[$key] = $this->readCanAttribute($controller, $action);
+            $this->resolved[$key] = $this->canAttributeReader->read($controller, $action);
         }
 
         return $this->resolved[$key];
-    }
-
-    /**
-     * @throws ReflectionException
-     */
-    private function readCanAttribute(
-        string $controller,
-        string $action,
-    ): ?Can {
-        $method = new ReflectionMethod($controller, $action);
-        $attributes = $method->getAttributes(Can::class);
-
-        if ($attributes === []) {
-            $attributes = new ReflectionClass($controller)->getAttributes(Can::class);
-        }
-
-        return $attributes === [] ? null : $attributes[0]->newInstance();
     }
 }
