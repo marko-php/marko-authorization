@@ -8,8 +8,10 @@ use Closure;
 use Marko\Authentication\AuthManager;
 use Marko\Authentication\Config\AuthConfig;
 use Marko\Authentication\Contracts\GuardInterface;
+use Marko\Authentication\Contracts\UserProviderInterface;
 use Marko\Authentication\Exceptions\AuthException;
 use Marko\Authentication\Token\RememberTokenManager;
+use Marko\Authentication\UserProviderResolver;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Config\AuthorizationConfig;
 use Marko\Authorization\Contracts\GateInterface;
@@ -201,10 +203,11 @@ function validatorContainerWithRealAuthManager(
     $container = new Container();
     $container->instance(AuthConfig::class, $authConfig);
     $container->instance(AuthorizationConfig::class, new AuthorizationConfig($configRepository));
+    $container->instance(UserProviderInterface::class, new FakeUserProvider());
     $container->instance(AuthManager::class, new AuthManager(
         config: $authConfig,
         session: new FakeSession(),
-        provider: new FakeUserProvider(),
+        providerResolver: new UserProviderResolver($authConfig, $container),
         eventDispatcher: new FakeEventDispatcher(),
         cookieJar: new FakeCookieJar(),
         rememberTokenManager: new RememberTokenManager(new FakeClock()),
