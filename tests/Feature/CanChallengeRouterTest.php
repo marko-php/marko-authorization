@@ -18,6 +18,7 @@ use Marko\Authorization\Gate;
 use Marko\Authorization\Middleware\AuthorizationMiddleware;
 use Marko\Authorization\PolicyRegistry;
 use Marko\Core\Container\Container;
+use Marko\Database\Config\DatabaseTimezoneConfig;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\RouteCollection;
@@ -178,6 +179,7 @@ function createTokenGuardRouter(): Router
         repository: new ChallengeTokenRepository(),
         currentRequest: $currentRequest,
         clock: new ChallengeClock(),
+        databaseTimezoneConfig: DatabaseTimezoneConfig::fromName('UTC'),
         provider: new FakeUserProvider([7 => new ChallengeStubUser()]),
     );
 
