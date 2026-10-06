@@ -284,10 +284,14 @@ describe('#[Can] boot validation', function (): void {
         $project = $this->projects[] = canBootProject(['can' => true]);
         touch($project['base'] . '/broken-auth');
 
+        $app = canBootApplication($project['base']);
+
         try {
-            canBootApplication($project['base'])->initialize();
+            $app->initialize();
             $this->fail('Expected AuthorizationConfigurationException');
         } catch (AuthorizationConfigurationException $e) {
+            // A failed boot leaves the bootstrap error handler installed for the uncaught exception
+            $app->bootstrapErrorHandler->unregister();
             expect($e->getMessage())->toContain("guard 'session'")
                 ->toContain('No user provider configured')
                 ->and($e->getContext())->toContain($project['namespace'] . '\\AdminController::dashboard');
@@ -298,10 +302,14 @@ describe('#[Can] boot validation', function (): void {
         // 'sesion' is in neither the app's nor the package's authentication.guards.
         $project = $this->projects[] = canBootProject(['can' => true, 'defaultGuard' => 'sesion']);
 
+        $app = canBootApplication($project['base']);
+
         try {
-            canBootApplication($project['base'])->initialize();
+            $app->initialize();
             $this->fail('Expected AuthorizationConfigurationException');
         } catch (AuthorizationConfigurationException $e) {
+            // A failed boot leaves the bootstrap error handler installed for the uncaught exception
+            $app->bootstrapErrorHandler->unregister();
             expect($e->getMessage())->toContain("guard 'sesion'")
                 ->toContain("Guard 'sesion' is not defined in authentication.guards")
                 ->and($e->getPrevious())->toBeInstanceOf(AuthException::class)
