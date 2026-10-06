@@ -6,12 +6,12 @@ namespace Marko\Authorization\Middleware;
 
 use Closure;
 use Marko\Authentication\Contracts\GuardInterface;
+use Marko\Authentication\Exceptions\UnauthenticatedException;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\Contracts\GateInterface;
 use Marko\Authorization\Exceptions\AuthorizationException;
 use Marko\Authorization\Exceptions\PolicyException;
 use Marko\Authorization\Routing\CanAttributeReader;
-use Marko\Routing\Exceptions\HttpException;
 use Marko\Routing\Http\Request;
 use Marko\Routing\Http\Response;
 use Marko\Routing\Middleware\MiddlewareInterface;
@@ -29,8 +29,10 @@ use ReflectionException;
  * construct them, so they cost nothing and need no authentication or
  * session configuration.
  *
- * Failures are thrown, never rendered here: a guest gets an HttpException
- * (401) and a denied user an AuthorizationException (403). The routing
+ * Failures are thrown, never rendered here: a guest gets an
+ * UnauthenticatedException (401), which carries the guard's WWW-Authenticate
+ * challenge when the guard is stateless (e.g. the token guard), and a denied
+ * user an AuthorizationException (403). The routing
  * pipeline renders both through ExceptionRenderer, with content negotiation
  * and any app-level renderer Preference.
  */
@@ -59,7 +61,7 @@ class AuthorizationMiddleware implements MiddlewareInterface
     ) {}
 
     /**
-     * @throws AuthorizationException|HttpException|PolicyException|ReflectionException
+     * @throws AuthorizationException|PolicyException|ReflectionException|UnauthenticatedException
      */
     public function handle(
         Request $request,
@@ -71,8 +73,10 @@ class AuthorizationMiddleware implements MiddlewareInterface
             return $next($request);
         }
 
-        if (!$this->guard()->check()) {
-            throw HttpException::unauthorized('Unauthorized.');
+        $guard = $this->guard();
+
+        if (!$guard->check()) {
+            throw UnauthenticatedException::forGuard($guard);
         }
 
         $arguments = [];

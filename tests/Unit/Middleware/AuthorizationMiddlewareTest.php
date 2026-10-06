@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Marko\Authorization\Tests\Unit\Middleware;
 
 use Marko\Authentication\Contracts\GuardInterface;
+use Marko\Authentication\Contracts\StatelessGuardInterface;
+use Marko\Authentication\Exceptions\UnauthenticatedException;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
@@ -83,6 +85,15 @@ class MiddlewareStubUser implements AuthorizableInterface
         mixed ...$arguments,
     ): bool {
         return false;
+    }
+}
+
+// Stands in for a token guard: stateless, with a Bearer challenge
+class MiddlewareStatelessGuard extends FakeGuard implements StatelessGuardInterface
+{
+    public function getChallenge(): string
+    {
+        return 'Bearer';
     }
 }
 
@@ -245,6 +256,35 @@ it('throws a 401 HttpException when user is not authenticated', function (): voi
         $this->fail('Expected HttpException');
     } catch (HttpException $exception) {
         expect($exception->getStatusCode())->toBe(401);
+    }
+});
+
+it("sends the stateless guard's WWW-Authenticate challenge on a 401 for a guest", function (): void {
+    $guard = new MiddlewareStatelessGuard(name: 'api', attemptResult: false); // No user set
+
+    $middleware = createAuthMiddleware(gate: createMiddlewareGate(guard: $guard), guard: $guard);
+
+    try {
+        $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+        $this->fail('Expected UnauthenticatedException');
+    } catch (UnauthenticatedException $exception) {
+        expect($exception->getStatusCode())->toBe(401)
+            ->and($exception->getMessage())->toBe('Unauthorized.')
+            ->and($exception->getHeaders())->toBe(['WWW-Authenticate' => 'Bearer']);
+    }
+});
+
+it('sends no WWW-Authenticate header on a 401 for a guest on a stateful guard', function (): void {
+    $guard = new FakeGuard(name: 'web', attemptResult: false); // No user set
+
+    $middleware = createAuthMiddleware(gate: createMiddlewareGate(guard: $guard), guard: $guard);
+
+    try {
+        $middleware->handle(createRoutedRequest('create'), createSuccessfulNext());
+        $this->fail('Expected UnauthenticatedException');
+    } catch (UnauthenticatedException $exception) {
+        expect($exception->getStatusCode())->toBe(401)
+            ->and($exception->getHeaders())->toBe([]);
     }
 });
 
