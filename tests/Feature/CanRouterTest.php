@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Feature;
 
+use DateTimeImmutable;
 use Marko\Authentication\Contracts\GuardInterface;
 use Marko\Authorization\Attributes\Can;
 use Marko\Authorization\AuthorizableInterface;
@@ -99,6 +100,15 @@ class RouterStubUser implements AuthorizableInterface
 
     public function setRememberToken(
         ?string $token,
+    ): void {}
+
+    public function getRememberTokenExpiresAt(): ?DateTimeImmutable
+    {
+        return null;
+    }
+
+    public function setRememberTokenExpiresAt(
+        ?DateTimeImmutable $expiresAt,
     ): void {}
 
     public function getRememberTokenName(): string

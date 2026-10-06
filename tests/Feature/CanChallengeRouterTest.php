@@ -65,6 +65,15 @@ class ChallengeStubUser implements AuthorizableInterface
         ?string $token,
     ): void {}
 
+    public function getRememberTokenExpiresAt(): ?DateTimeImmutable
+    {
+        return null;
+    }
+
+    public function setRememberTokenExpiresAt(
+        ?DateTimeImmutable $expiresAt,
+    ): void {}
+
     public function getRememberTokenName(): string
     {
         return 'remember_token';

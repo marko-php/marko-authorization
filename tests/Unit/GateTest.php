@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marko\Authorization\Tests\Unit;
 
+use DateTimeImmutable;
 use Marko\Authentication\Contracts\AbilityScopedGuardInterface;
 use Marko\Authorization\AuthorizableInterface;
 use Marko\Authorization\Contracts\GateInterface;
@@ -41,6 +42,15 @@ class StubUser implements AuthorizableInterface
 
     public function setRememberToken(
         ?string $token,
+    ): void {}
+
+    public function getRememberTokenExpiresAt(): ?DateTimeImmutable
+    {
+        return null;
+    }
+
+    public function setRememberTokenExpiresAt(
+        ?DateTimeImmutable $expiresAt,
     ): void {}
 
     public function getRememberTokenName(): string
